@@ -1,0 +1,19 @@
+{
+  "name": "BabyFtpd",
+  "version": "0.0.1",
+  "description": "BabyFtpd ========",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bya00417/BabyFtpd.git"
+  },
+  "author": "Taka",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bya00417/BabyFtpd/issues"
+  },
+  "homepage": "https://github.com/bya00417/BabyFtpd"
+}
