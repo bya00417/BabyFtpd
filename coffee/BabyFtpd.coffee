@@ -34,7 +34,7 @@ module.exports = class BabyFtpd
           for i in [0..replys.length-1]
             if i is (replys.length - 1)
               replyData += status.toString() + " "
-            else if replys[i].substring(0, i).match(/[0-9]/)
+            else if replys[i].match(/^[0-9]/)
               replyData += "  "
             replyData += replys[i] + "\r\n"
         @write(replyData, callback)
