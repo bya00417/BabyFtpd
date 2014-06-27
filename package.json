@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/bya00417/BabyFtpd/issues"
   },
-  "homepage": "https://github.com/bya00417/BabyFtpd"
+  "homepage": "https://github.com/bya00417/BabyFtpd",
+  "devDependencies": {
+    "coffee-script": "^1.7.1"
+  }
 }
