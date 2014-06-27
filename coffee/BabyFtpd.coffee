@@ -1,14 +1,14 @@
 "use strict"
 #
-# # FTP Deamon
+# # Baby FTP Deamon
 #
 net = require("net")
 
 module.exports = class BabyFtpd
-  constructor: ()->
+  constructor: (option = {})->
     @piServer  = undefined
   
-  listen: (port = 21, host = "localhost")->
+  listen: (port = 21, host = "0.0.0.0")->
     @piServer = net.createServer()
     
     @piServer.on 'listening', ()->
@@ -25,7 +25,19 @@ module.exports = class BabyFtpd
       # Socket response
       socket.reply = (status, message, callback)->
         message = message ? messages[status.toString()] || "No information"
-        @write(status.toString() + " " + message + "\r\n", callback)
+        message = message.replace /\r?\n/g, "\n"
+        replys = message.split("\n")
+        if replys.length is 1
+          replyData = status.toString() + " " + replys[0] + "\r\n"
+        else
+          replyData = status.toString() + "-"
+          for i in [0..replys.length-1]
+            if i is (replys.length - 1)
+              replyData += status.toString() + " "
+            else if replys[i].substring(0, i).match(/[0-9]/)
+              replyData += "  "
+            replyData += replys[i] + "\r\n"
+        @write(replyData, callback)
       
       # Receive data
       socket.on 'data', (recData)->
@@ -140,8 +152,6 @@ module.exports = class BabyFtpd
       @reply 202
     "STAT": ()->
       @reply 202
-    "HELP": ()->
-      @reply 202
     
     # 仮実装しているもの
     #"USER": (username)->
@@ -223,6 +233,14 @@ module.exports = class BabyFtpd
     
     "NOOP": ()->
       @reply 200
+      
+    "HELP": ()->
+      @reply 214, """
+        The following commands are recognized
+        USER    PASS    PWD     NLST    RETR    SYST
+        QUIT    PASV    NOOP    HELP
+        Direct comments to root
+        """
 
 
 unless module.parent
