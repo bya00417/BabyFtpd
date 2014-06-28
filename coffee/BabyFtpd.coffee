@@ -5,8 +5,12 @@
 net = require("net")
 
 module.exports = class BabyFtpd
+  authUser = {}
   constructor: (option = {})->
-    @piServer  = undefined
+    @piServer = undefined
+  
+  addUser: (userName, userPass)->
+    authUser[userName] = userPass
   
   listen: (port = 21, host = "0.0.0.0")->
     @piServer = net.createServer()
@@ -21,6 +25,7 @@ module.exports = class BabyFtpd
       socket.setNoDelay()
       socket.dataEncoding = "binary"
       socket.passive = false
+      socket.userName = null
       
       # Socket response
       socket.reply = (status, message, callback)->
@@ -154,18 +159,21 @@ module.exports = class BabyFtpd
       @reply 202
     
     # 仮実装しているもの
-    #"USER": (username)->
-    #"PASS": (password)->
     #"RETR": ()->
     #"PWD": ()->
     #"NLST": ()->
     
     # 各コマンドの処理
     "USER": (username)->
+      @userName = username
       @reply 331
     
     "PASS": (password)->
-      @reply 230
+      userPass = authUser[@userName]
+      if userPass? and userPass is password
+        @reply 230
+      else
+        @reply 530
     
     "PWD": ()->
       @reply 257, '"/"'
@@ -245,4 +253,5 @@ module.exports = class BabyFtpd
 
 unless module.parent
   ftpd = new BabyFtpd
+  ftpd.addUser "taka", "1234"
   ftpd.listen 8021, "localhost"
