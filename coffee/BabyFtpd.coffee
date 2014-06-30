@@ -2,7 +2,9 @@
 #
 # # Baby FTP Deamon
 #
-net = require("net")
+net  = require "net"
+fs   = require "fs"
+exec = require("child_process").exec
 
 module.exports = class BabyFtpd
   authUser = {}
@@ -151,8 +153,6 @@ module.exports = class BabyFtpd
       @reply 202
     "MKD": ()->
       @reply 202
-    "LIST": ()->
-      @reply 202
     "SITE": ()->
       @reply 202
     "STAT": ()->
@@ -179,8 +179,14 @@ module.exports = class BabyFtpd
       @reply 257, '"/"'
     
     "NLST": ()->
-      @dtpServer.dataQueue = "ABC\r\n"
-      @reply 150
+      fs.readdir ".", (err, files)=>
+        @dtpServer.dataQueue = files.join("\n")
+        @reply 150
+    
+    "LIST": ()->
+      exec "export LANG=en_US.UTF-8; ls -l", (err, stdout, stderr)=>
+        @dtpServer.dataQueue = stdout
+        @reply 150
     
     "RETR": ()->
       @dtpServer.dataQueue = "<html></html>"
