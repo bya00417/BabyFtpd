@@ -7,16 +7,17 @@ fs   = require "fs"
 exec = require("child_process").exec
 
 module.exports = class BabyFtpd
+  @sysName: "Node_BabyFTP_Server"
   authUser = {}
   constructor: (option = {})->
-    @piServer = undefined
+    @fileSystem = new BabyFtpd.FileSystem()
+    @piServer = net.createServer()
+    @piServer.fileSystem = @fileSystem
   
   addUser: (userName, userPass)->
     authUser[userName] = userPass
   
   listen: (port = 21, host = "0.0.0.0")->
-    @piServer = net.createServer()
-    
     @piServer.on 'listening', ()->
       hostInfo = @address()
       console.log "Server listening on #{hostInfo.address}:#{hostInfo.port}"
@@ -28,6 +29,8 @@ module.exports = class BabyFtpd
       socket.dataEncoding = "binary"
       socket.passive = false
       socket.userName = null
+      socket.fileSystem = @fileSystem
+      socket.sessionDir = "/"
       
       # Socket response
       socket.reply = (status, message, callback)->
@@ -115,8 +118,6 @@ module.exports = class BabyFtpd
     # 未実装のもの
     "ACCT": ()->
       @reply 202
-    "CWD": ()->
-      @reply 202
     "CDUP": ()->
       @reply 202
     "SMNT": ()->
@@ -160,8 +161,6 @@ module.exports = class BabyFtpd
     
     # 仮実装しているもの
     #"RETR": ()->
-    #"PWD": ()->
-    #"NLST": ()->
     
     # 各コマンドの処理
     "USER": (username)->
@@ -175,16 +174,24 @@ module.exports = class BabyFtpd
       else
         @reply 530
     
+    "CWD": (reqPath)->
+      try
+        @sessionDir = @fileSystem.getNewPath @sessionDir, reqPath
+        @reply 250, "CWD command successful"
+      catch err
+        @reply 550, "#{reqPath}: No such file or directory"
+    
     "PWD": ()->
-      @reply 257, '"/"'
+      @reply 257, "\"#{@sessionDir}\""
     
     "NLST": ()->
-      fs.readdir ".", (err, files)=>
-        @dtpServer.dataQueue = files.join("\n")
+      fs.readdir @fileSystem.baseDir+@sessionDir, (err, files)=>
+        @dtpServer.dataQueue = files.join("\r\n") + "\r\n"
         @reply 150
     
     "LIST": ()->
-      exec "export LANG=en_US.UTF-8; ls -l", (err, stdout, stderr)=>
+      exec "export LANG=en_US.UTF-8; ls -l #{@fileSystem.baseDir}#{@sessionDir}", (err, stdout, stderr)=>
+        stdout = stdout.replace(/^total [0-9]+$/im, "").trim()
         @dtpServer.dataQueue = stdout
         @reply 150
     
@@ -193,7 +200,7 @@ module.exports = class BabyFtpd
       @reply 150
     
     "SYST": ()->
-      @reply 215, "Node_BabyFTP_server"
+      @reply 215, BabyFtpd.sysName
     
     "QUIT": ()->
       @reply 221
@@ -251,13 +258,34 @@ module.exports = class BabyFtpd
     "HELP": ()->
       @reply 214, """
         The following commands are recognized
-        USER    PASS    PWD     NLST    RETR    SYST
-        QUIT    PASV    NOOP    HELP
+        USER    PASS    PWD     NLST    LIST    RETR    SYST
+        CWD     QUIT    PASV    NOOP    HELP
         Direct comments to root
         """
 
-
-unless module.parent
-  ftpd = new BabyFtpd
-  ftpd.addUser "taka", "1234"
-  ftpd.listen 8021, "localhost"
+class BabyFtpd.FileSystem
+  constructor: ()->
+    @baseDir = null
+  
+  setBase: (dirPath)->
+    @baseDir = dirPath
+  
+  getNewPath: (nowDir, reqPath)->
+    if reqPath.indexOf("/") is 0
+      retPath = reqPath
+    else
+      tmpDir = nowDir.split("/")
+      reqPath.split("/").map (aPath)->
+        if aPath is ".."
+          tmpDir.pop()
+          if tmpDir.length is 1
+            tmpDir.push ""
+        else if aPath is "."
+          null
+        else
+          if tmpDir.length is 2 and tmpDir[1] is ""
+            tmpDir.pop()
+          tmpDir.push aPath
+      retPath = tmpDir.join("/")
+    fs.readdirSync @baseDir+retPath
+    retPath
