@@ -2,9 +2,9 @@
 #
 # # Baby FTP Deamon
 #
-net  = require "net"
-fs   = require "fs"
-exec = require("child_process").exec
+net       = require "net"
+fs        = require "fs"
+exec      = require("child_process").exec
 
 module.exports = class BabyFtpd
   @sysName: "Node_BabyFTP_Server"
@@ -184,16 +184,21 @@ module.exports = class BabyFtpd
     "PWD": ()->
       @reply 257, "\"#{@sessionDir}\""
     
-    "NLST": ()->
-      fs.readdir @fileSystem.baseDir+@sessionDir, (err, files)=>
-        @dtpServer.dataQueue = files.join("\r\n") + "\r\n"
-        @reply 150
+    "NLST": (reqPath = "")->
+      @fileSystem.getNlst @sessionDir, reqPath, (err, files)=>
+        if err?
+          @reply 550, "#{reqPath}: No such file or directory"
+        else
+          @dtpServer.dataQueue = files.join("\r\n") + "\r\n"
+          @reply 150
     
-    "LIST": ()->
-      exec "export LANG=en_US.UTF-8; ls -l #{@fileSystem.baseDir}#{@sessionDir}", (err, stdout, stderr)=>
-        stdout = stdout.replace(/^total [0-9]+$/im, "").trim()
-        @dtpServer.dataQueue = stdout
-        @reply 150
+    "LIST": (reqPath = "")->
+      @fileSystem.getList @sessionDir, reqPath, (err, stdout, stderr)=>
+        if err?
+          @reply 550, "#{reqPath}: No such file or directory"
+        else
+          @dtpServer.dataQueue = stdout.replace(/^total [0-9]+$/im, "").trim()
+          @reply 150
     
     "RETR": ()->
       @dtpServer.dataQueue = "<html></html>"
@@ -289,3 +294,11 @@ class BabyFtpd.FileSystem
       retPath = tmpDir.join("/")
     fs.readdirSync @baseDir+retPath
     retPath
+  
+  getNlst: (nowDir, reqPath, callback)->
+    retPath = @getNewPath nowDir, reqPath
+    fs.readdir @baseDir+retPath, callback
+  
+  getList: (nowDir, reqPath, callback)->
+    retPath = @getNewPath nowDir, reqPath
+    exec "export LANG=en_US.UTF-8; ls -l #{@baseDir}#{retPath}", callback
