@@ -18,5 +18,6 @@
   "homepage": "https://github.com/bya00417/BabyFtpd",
   "devDependencies": {
     "coffee-script": "^1.7.1"
-  }
+  },
+  "dependencies": {}
 }

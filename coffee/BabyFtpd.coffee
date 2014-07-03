@@ -7,8 +7,12 @@ fs        = require "fs"
 exec      = require("child_process").exec
 
 module.exports = class BabyFtpd
-  @sysName: "Node_BabyFTP_Server"
+  # Static variables
+  @sysName = "Node_BabyFTP_Server"
+  
+  # fields
   authUser = {}
+  
   constructor: (option = {})->
     @fileSystem = new BabyFtpd.FileSystem()
     @piServer = net.createServer()
@@ -267,6 +271,7 @@ module.exports = class BabyFtpd
         CWD     QUIT    PASV    NOOP    HELP
         Direct comments to root
         """
+
 
 class BabyFtpd.FileSystem
   constructor: ()->
