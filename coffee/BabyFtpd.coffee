@@ -2,9 +2,9 @@
 #
 # # Baby FTP Deamon
 #
-net       = require "net"
-fs        = require "fs"
-exec      = require("child_process").exec
+net   = require "net"
+fs    = require "fs"
+exec  = require("child_process").exec
 
 module.exports = class BabyFtpd
   # Static variables
@@ -163,9 +163,6 @@ module.exports = class BabyFtpd
     "STAT": ()->
       @reply 202
     
-    # 仮実装しているもの
-    #"RETR": ()->
-    
     # 各コマンドの処理
     "USER": (username)->
       @userName = username
@@ -191,22 +188,29 @@ module.exports = class BabyFtpd
     "NLST": (reqPath = "")->
       @fileSystem.getNlst @sessionDir, reqPath, (err, files)=>
         if err?
+          if @passive
+            @dtpServer.close()
           @reply 550, "#{reqPath}: No such file or directory"
         else
-          @dtpServer.dataQueue = files.join("\r\n") + "\r\n"
-          @reply 150
+          @dtpServer.dtpSocket.sender files.join("\r\n") + "\r\n"
     
     "LIST": (reqPath = "")->
       @fileSystem.getList @sessionDir, reqPath, (err, stdout, stderr)=>
         if err?
+          if @passive
+            @dtpServer.close()
           @reply 550, "#{reqPath}: No such file or directory"
         else
-          @dtpServer.dataQueue = stdout.replace(/^total [0-9]+$/im, "").trim()
-          @reply 150
+          @dtpServer.dtpSocket.sender stdout.replace(/^total [0-9]+$/im, "").trim()
     
-    "RETR": ()->
-      @dtpServer.dataQueue = "<html></html>"
-      @reply 150
+    "RETR": (reqPath)->
+      @fileSystem.getFile @sessionDir, reqPath, (err, data)=>
+        if err?
+          if @passive
+            @dtpServer.close()
+          @reply 550, "#{reqPath}: No such file or directory"
+        else
+          @dtpServer.dtpSocket.sender data
     
     "SYST": ()->
       @reply 215, BabyFtpd.sysName
@@ -216,50 +220,9 @@ module.exports = class BabyFtpd
       @end()
     
     "PASV": ()->
-      socket = @
-      socket.passive = true
-      socket.dtpServer = net.createServer()
-      dtpHost = socket.server.address().address
-      socket.dtpServer.dataQueue = null
-      
-      socket.dtpServer.on 'listening', ()->
-        dtpAddress = @address()
-        console.log "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
-        host  = dtpAddress.address.split(".").join(",")
-        port1 = parseInt(dtpAddress.port / 256, 10)
-        port2 = dtpAddress.port % 256
-        socket.reply 227, "Entering Extended Passive Mode (#{host},#{port1},#{port2})"
-      
-      socket.dtpServer.on "connection", (dtpSocket)->
-        console.log "DTP Connect from #{dtpSocket.remoteAddress}"
-        dtpSocket.setTimeout(0)
-        dtpSocket.setNoDelay()
-        dtpSocket.dataEncoding = "binary"
-        
-        dtpSocket.on "end", ()->
-            socket.dtpServer.close()
-            socket.reply 226
-        dtpSocket.on "close", ()->
-          console.log "DTP Socket closed"
-        dtpSocket.on "connect", ()->
-          console.log "DTP Socket connect"
-        dtpSocket.on 'data', (recData)->
-          console.log recData.toString().trim()
-        
-        dtpSocket.sender = ()->
-          console.log socket.dtpServer.dataQueue
-          if socket.dtpServer.dataQueue isnt null
-            console.log "Send"
-            clearInterval(dtpSocket.intervalId)
-            dtpSocket.end(socket.dtpServer.dataQueue)
-        
-        dtpSocket.intervalId = setInterval(dtpSocket.sender, 100)
-      
-      socket.dtpServer.on "close", ()->
-        console.log "Data Transfer Proccess Server closed"
-        socket.passive = false
-        
-      socket.dtpServer.listen(0, dtpHost)
+      @passive = true
+      @dtpServer = dtpServer.call @, @
+      @dtpServer.listen 0, @server.address().address
     
     "NOOP": ()->
       @reply 200
@@ -271,6 +234,44 @@ module.exports = class BabyFtpd
         CWD     QUIT    PASV    NOOP    HELP
         Direct comments to root
         """
+  
+  dtpServer = (socket)->
+    dtp = net.createServer()
+    
+    dtp.on 'listening', ()->
+      dtpAddress = @address()
+      console.log "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
+      host  = dtpAddress.address.split(".").join(",")
+      port1 = parseInt(dtpAddress.port / 256, 10)
+      port2 = dtpAddress.port % 256
+      socket.reply 227, "Entering Extended Passive Mode (#{host},#{port1},#{port2})"
+    
+    dtp.on "close", ()->
+      console.log "Data Transfer Proccess Server closed"
+      socket.passive = false
+    
+    dtp.on "connection", (dtpSocket)->
+      @dtpSocket = dtpSocket
+      console.log "DTP Connect from #{dtpSocket.remoteAddress}"
+      dtpSocket.setTimeout(0)
+      dtpSocket.setNoDelay()
+      dtpSocket.dataEncoding = "binary"
+      
+      dtpSocket.on "end", ()->
+          socket.dtpServer.close()
+          socket.reply 226
+      dtpSocket.on "close", ()->
+        console.log "DTP Socket closed"
+      dtpSocket.on "connect", ()->
+        console.log "DTP Socket connect"
+      dtpSocket.on 'data', (recData)->
+        console.log recData.toString().trim()
+      
+      dtpSocket.sender = (dataQueue)->
+        socket.reply 150
+        console.log "DTP Send"
+        dtpSocket.end(dataQueue)
+    dtp
 
 
 class BabyFtpd.FileSystem
@@ -297,13 +298,26 @@ class BabyFtpd.FileSystem
             tmpDir.pop()
           tmpDir.push aPath
       retPath = tmpDir.join("/")
-    fs.readdirSync @baseDir+retPath
+    fs.statSync @baseDir+retPath
     retPath
   
   getNlst: (nowDir, reqPath, callback)->
-    retPath = @getNewPath nowDir, reqPath
-    fs.readdir @baseDir+retPath, callback
+    try
+      retPath = @getNewPath nowDir, reqPath
+      fs.readdir @baseDir+retPath, callback
+    catch err
+      callback(err)
   
   getList: (nowDir, reqPath, callback)->
-    retPath = @getNewPath nowDir, reqPath
-    exec "export LANG=en_US.UTF-8; ls -l #{@baseDir}#{retPath}", callback
+    try
+      retPath = @getNewPath nowDir, reqPath
+      exec "export LANG=en_US.UTF-8; ls -l #{@baseDir}#{retPath}", callback
+    catch err
+      callback(err)
+  
+  getFile: (nowDir, reqPath, callback)->
+    try
+      retPath = @getNewPath nowDir, reqPath
+      fs.readFile @baseDir+retPath, callback
+    catch err
+      callback(err)
