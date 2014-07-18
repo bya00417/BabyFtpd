@@ -136,8 +136,6 @@ module.exports = class BabyFtpd
       @reply 202
     "MODE": ()->
       @reply 202
-    "STOR": ()->
-      @reply 202
     "STOU": ()->
       @reply 202
     "APPE": ()->
@@ -211,6 +209,9 @@ module.exports = class BabyFtpd
           @reply 550, "#{reqPath}: No such file or directory"
         else
           @dtpServer.dtpSocket.sender data
+    
+    "STOR": (reqPath)->
+      @reply 125
     
     "SYST": ()->
       @reply 215, BabyFtpd.sysName
