@@ -203,14 +203,14 @@ module.exports = class BabyFtpd
     
     "CWD": (reqPath)->
       try
-        @sessionDir = @fileSystem.getNewPath @sessionDir, reqPath
+        @sessionDir = @fileSystem.getNewPath @sessionDir, reqPath, true
         @reply 250, "CWD command successful"
       catch err
         @reply 550, "#{reqPath}: No such directory"
     
     "CDUP": ()->
       try
-        @sessionDir = @fileSystem.getNewPath @sessionDir, ".."
+        @sessionDir = @fileSystem.getNewPath @sessionDir, "..", true
         @reply 200, "CDUP command successful"
       catch err
         @reply 550, "No such directory"
@@ -251,7 +251,7 @@ module.exports = class BabyFtpd
         fileName = splitPath.pop()
         dirPath = splitPath.join "/"
         try
-          retPath = @fileSystem.getNewPath  @sessionDir, dirPath
+          retPath = @fileSystem.getNewPath  @sessionDir, dirPath, true
           srorePath = retPath + "/" + fileName
         catch err
           if @passive
@@ -275,7 +275,7 @@ module.exports = class BabyFtpd
         mkDirName = splitPath.pop()
         dirPath = splitPath.join "/"
         try
-          retPath = @fileSystem.getNewPath  @sessionDir, dirPath
+          retPath = @fileSystem.getNewPath  @sessionDir, dirPath, true
           mkPath = retPath + "/" + mkDirName
         catch err
           return @reply 550, "#{reqPath}: No such directory"
@@ -295,7 +295,7 @@ module.exports = class BabyFtpd
     
     "RMD": (reqPath)->
       try
-        delPath = @fileSystem.getNewPath  @sessionDir, reqPath
+        delPath = @fileSystem.getNewPath  @sessionDir, reqPath, true
         @reply 202
       catch err
         return @reply 550, "#{reqPath}: No such directory"
@@ -389,7 +389,7 @@ class BabyFtpd.FileSystem
   setBase: (dirPath)->
     @baseDir = dirPath
   
-  getNewPath: (nowDir, reqPath)->
+  getNewPath: (nowDir, reqPath, isDir = false)->
     if reqPath.indexOf("/") is 0
       retPath = reqPath
     else
@@ -409,7 +409,7 @@ class BabyFtpd.FileSystem
     if retPath.length > 1 and retPath.match(/\/$/) isnt null
       retPath = retPath.replace /\/$/, ""
     pathStats = fs.statSync @baseDir+retPath
-    if pathStats.isDirectory()
+    if !isDir or pathStats.isDirectory()
       retPath
     else
       throw new Error "no directory"
