@@ -122,8 +122,6 @@ module.exports = class BabyFtpd
     # 未実装のもの
     "ACCT": ()->
       @reply 202
-    "CDUP": ()->
-      @reply 202
     "SMNT": ()->
       @reply 202
     "REIN": ()->
@@ -131,11 +129,11 @@ module.exports = class BabyFtpd
     "PORT": ()->
       @reply 202
     "TYPE": ()->
-      @reply 202
+      @reply 200
     "STRU": ()->
       @reply 202
     "MODE": ()->
-      @reply 202
+      @reply 200
     "STOU": ()->
       @reply 202
     "APPE": ()->
@@ -152,13 +150,43 @@ module.exports = class BabyFtpd
       @reply 202
     "DELE": ()->
       @reply 202
-    "RMD": ()->
-      @reply 202
-    "MKD": ()->
-      @reply 202
-    "SITE": ()->
-      @reply 202
     "STAT": ()->
+      @reply 202
+    "LPRT": ()->
+      @reply 202
+    "LPSV": ()->
+      @reply 202
+    "ADAT": ()->
+      @reply 202
+    "AUTH": ()->
+      @reply 202
+    "CCC": ()->
+      @reply 202
+    "CONF": ()->
+      @reply 202
+    "ENC": ()->
+      @reply 202
+    "MIC": ()->
+      @reply 202
+    "PBSZ": ()->
+      @reply 202
+    "FEAT": ()->
+      @reply 202
+    "OPTS": ()->
+      @reply 202
+    "EPRT": ()->
+      @reply 202
+    "EPSV": ()->
+      @reply 202
+    "LANG": ()->
+      @reply 202
+    "MDTM": ()->
+      @reply 202
+    "MLSD": ()->
+      @reply 202
+    "MLST": ()->
+      @reply 202
+    "SIZE": ()->
       @reply 202
     
     # 各コマンドの処理
@@ -178,7 +206,14 @@ module.exports = class BabyFtpd
         @sessionDir = @fileSystem.getNewPath @sessionDir, reqPath
         @reply 250, "CWD command successful"
       catch err
-        @reply 550, "#{reqPath}: No such file or directory"
+        @reply 550, "#{reqPath}: No such directory"
+    
+    "CDUP": ()->
+      try
+        @sessionDir = @fileSystem.getNewPath @sessionDir, ".."
+        @reply 200, "CDUP command successful"
+      catch err
+        @reply 550, "No such directory"
     
     "PWD": ()->
       @reply 257, "\"#{@sessionDir}\""
@@ -211,7 +246,59 @@ module.exports = class BabyFtpd
           @dtpServer.dtpSocket.sender data
     
     "STOR": (reqPath)->
-      @reply 125
+      if reqPath.indexOf("/") >= 0
+        splitPath = reqPath.split "/"
+        fileName = splitPath.pop()
+        dirPath = splitPath.join "/"
+        try
+          retPath = @fileSystem.getNewPath  @sessionDir, dirPath
+          srorePath = retPath + "/" + fileName
+        catch err
+          if @passive
+            @dtpServer.close()
+          return @reply 550, "#{reqPath}: No such file or directory"
+      else
+        if @sessionDir is "/"
+          srorePath = "/" + reqPath
+        else
+          srorePath = @sessionDir + "/" + reqPath
+      @dtpServer.store (storeData)=>
+        @fileSystem.setFile storeData, srorePath, (err)=>
+          if err?
+            @reply 550
+          else
+            @reply 250
+    
+    "MKD": (reqPath)->
+      if reqPath.indexOf("/") >= 0
+        splitPath = reqPath.split "/"
+        mkDirName = splitPath.pop()
+        dirPath = splitPath.join "/"
+        try
+          retPath = @fileSystem.getNewPath  @sessionDir, dirPath
+          mkPath = retPath + "/" + mkDirName
+        catch err
+          return @reply 550, "#{reqPath}: No such directory"
+      else
+        if @sessionDir is "/"
+          mkPath = "/" + reqPath
+        else
+          mkPath = @sessionDir + "/" + reqPath
+      @fileSystem.makeDir mkPath, (err)=>
+        if err?
+          if err.code is "EEXIST"
+            @reply 550, "#{reqPath}: File exists"
+          else
+            @reply 550
+        else
+          @reply 257, "\"#{reqPath}\" - Directory successfully created"
+    
+    "RMD": (reqPath)->
+      try
+        delPath = @fileSystem.getNewPath  @sessionDir, reqPath
+        @reply 202
+      catch err
+        return @reply 550, "#{reqPath}: No such directory"
     
     "SYST": ()->
       @reply 215, BabyFtpd.sysName
@@ -227,17 +314,31 @@ module.exports = class BabyFtpd
     
     "NOOP": ()->
       @reply 200
+    
+    "SITE": ()->
+      @reply 202
       
     "HELP": ()->
       @reply 214, """
         The following commands are recognized
         USER    PASS    PWD     NLST    LIST    RETR    SYST
-        CWD     QUIT    PASV    NOOP    HELP
+        CWD     CDUP    MKD     QUIT    PASV    NOOP    HELP
         Direct comments to root
         """
   
   dtpServer = (socket)->
     dtp = net.createServer()
+    dtp.storeMode = false
+    dtp.storeData = []
+    dtp.storeData.totalLength = 0
+    dtp.storeCall = undefined
+    
+    dtp.store = (callback)->
+      dtp.storeMode = true
+      dtp.storeData = []
+      dtp.storeData.totalLength = 0
+      dtp.storeCall = callback
+      socket.reply 125
     
     dtp.on 'listening', ()->
       dtpAddress = @address()
@@ -259,19 +360,25 @@ module.exports = class BabyFtpd
       dtpSocket.dataEncoding = "binary"
       
       dtpSocket.on "end", ()->
-          socket.dtpServer.close()
+        socket.dtpServer.close()
+        if dtp.storeMode
+          dtpSocket.storeMode = false
+          data = Buffer.concat dtp.storeData, dtp.storeData.totalLength
+          dtp.storeCall data
+        else
           socket.reply 226
       dtpSocket.on "close", ()->
         console.log "DTP Socket closed"
       dtpSocket.on "connect", ()->
         console.log "DTP Socket connect"
       dtpSocket.on 'data', (recData)->
-        console.log recData.toString().trim()
-      
+        dtp.storeData.push recData
+        dtp.storeData.totalLength += recData.length
       dtpSocket.sender = (dataQueue)->
         socket.reply 150
         console.log "DTP Send"
         dtpSocket.end(dataQueue)
+    
     dtp
 
 
@@ -299,8 +406,13 @@ class BabyFtpd.FileSystem
             tmpDir.pop()
           tmpDir.push aPath
       retPath = tmpDir.join("/")
-    fs.statSync @baseDir+retPath
-    retPath
+    if retPath.length > 1 and retPath.match(/\/$/) isnt null
+      retPath = retPath.replace /\/$/, ""
+    pathStats = fs.statSync @baseDir+retPath
+    if pathStats.isDirectory()
+      retPath
+    else
+      throw new Error "no directory"
   
   getNlst: (nowDir, reqPath, callback)->
     try
@@ -322,3 +434,10 @@ class BabyFtpd.FileSystem
       fs.readFile @baseDir+retPath, callback
     catch err
       callback(err)
+  
+  setFile: (storeData, srorePath, callback)->
+    console.log "save #{srorePath}"
+    fs.writeFile @baseDir+srorePath, storeData, "binary", callback
+
+  makeDir: (reqPath, callback)->
+    fs.mkdir @baseDir+reqPath, "0755", callback
