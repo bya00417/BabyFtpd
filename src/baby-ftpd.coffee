@@ -296,7 +296,14 @@ module.exports = class BabyFtpd
     "RMD": (reqPath)->
       try
         delPath = @fileSystem.getNewPath  @sessionDir, reqPath, true
-        @reply 202
+        @fileSystem.removeDir delPath, (err)=>
+          if err?
+            if err.code is "ENOTEMPTY"
+              @reply 550, "#{reqPath}: Directory not empty"
+            else
+              @reply 550
+          else
+            @reply 250, "\"#{reqPath}\" - Directory successfully deleted"
       catch err
         return @reply 550, "#{reqPath}: No such directory"
     
@@ -441,3 +448,6 @@ class BabyFtpd.FileSystem
 
   makeDir: (reqPath, callback)->
     fs.mkdir @baseDir+reqPath, "0755", callback
+
+  removeDir: (reqPath, callback)->
+    fs.rmdir @baseDir+reqPath, callback
