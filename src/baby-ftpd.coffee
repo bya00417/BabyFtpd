@@ -61,7 +61,7 @@ module.exports = class BabyFtpd
         args     = parts.slice 1, parts.length
         callable = commands[command]
         unless callable
-          @reply 502
+          @reply 500, "#{command} not understood"
         else
           callable.apply socket, args
       

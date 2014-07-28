@@ -9,7 +9,7 @@ module.exports = (grunt) ->
         bare: true
       src:
         files:
-          'lib/BabyFtpd.js':  'src/BabyFtpd.coffee'
+          'lib/baby-ftpd.js':  'src/baby-ftpd.coffee'
   
   for name of pkg.devDependencies when name.substring(0, 6) is 'grunt-' and name isnt "grunt-cli"
     grunt.loadNpmTasks name
