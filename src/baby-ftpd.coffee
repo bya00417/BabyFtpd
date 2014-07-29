@@ -273,7 +273,18 @@ module.exports = class BabyFtpd
 
     
     "DELE": (reqPath)->
-      @reply 202
+      try
+        delPath = @fileSystem.getNewPath @sessionDir, reqPath
+        checkDir = @fileSystem.checkPath delPath
+        if !checkDir.isFile()
+          throw new Error "no file"
+        @fileSystem.removeFile delPath, (err)=>
+          if err?
+              @reply 550
+          else
+            @reply 250, "\"#{reqPath}\" - File successfully deleted"
+      catch err
+        return @reply 550, "#{reqPath}: No such file or directory"
     
     "MKD": (reqPath)->
       try
@@ -438,6 +449,9 @@ class BabyFtpd.FileSystem
     winston.log "info", "save #{srorePath}"
     srorePath = @getNewPath  nowDir, reqPath
     fs.writeFile @baseDir+srorePath, storeData, "binary", callback
+  
+  removeFile: (reqPath, callback)->
+    fs.unlink @baseDir+reqPath, callback
 
   makeDir: (nowDir, reqPath, callback)->
     mkPath = @getNewPath  nowDir, reqPath
