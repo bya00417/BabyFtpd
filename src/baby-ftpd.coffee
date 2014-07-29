@@ -2,9 +2,11 @@
 #
 # # Baby FTP Deamon
 #
-net   = require "net"
-fs    = require "fs"
-exec  = require("child_process").exec
+net     = require "net"
+fs      = require "fs"
+path    = require "path"
+exec    = require("child_process").exec
+winston = require "winston"
 
 module.exports = class BabyFtpd
   # Static variables
@@ -17,6 +19,10 @@ module.exports = class BabyFtpd
     @fileSystem = new BabyFtpd.FileSystem()
     @piServer = net.createServer()
     @piServer.fileSystem = @fileSystem
+    winston.setLevels winston.config.syslog.levels
+    if option.logger?
+      if option.logger.console is false
+        winston.remove winston.transports.Console
   
   addUser: (userName, userPass)->
     authUser[userName] = userPass
@@ -24,10 +30,10 @@ module.exports = class BabyFtpd
   listen: (port = 21, host = "0.0.0.0")->
     @piServer.on 'listening', ()->
       hostInfo = @address()
-      console.log "Server listening on #{hostInfo.address}:#{hostInfo.port}"
+      winston.log "info", "Server listening on #{hostInfo.address}:#{hostInfo.port}"
     
     @piServer.on 'connection', (socket)->
-      console.log "Connect from #{socket.remoteAddress}"
+      winston.log "info", "Connect from #{socket.remoteAddress}"
       socket.setTimeout(0)
       socket.setNoDelay()
       socket.dataEncoding = "binary"
@@ -55,7 +61,7 @@ module.exports = class BabyFtpd
       
       # Receive data
       socket.on 'data', (recData)->
-        console.log recData.toString().trim()
+        winston.log "debug", recData.toString().trim()
         parts    = recData.toString().trim().split(" ")
         command  = parts[0].trim().toUpperCase()
         args     = parts.slice 1, parts.length
@@ -67,7 +73,7 @@ module.exports = class BabyFtpd
       
       # Socket closed
       socket.on 'close', ()->
-        console.log "Server socket closed."
+        winston.log "info", "Server socket closed."
       
       # Connect approved
       socket.reply 220
@@ -148,8 +154,6 @@ module.exports = class BabyFtpd
       @reply 202
     "ABOR": ()->
       @reply 202
-    "DELE": ()->
-      @reply 202
     "STAT": ()->
       @reply 202
     "LPRT": ()->
@@ -203,14 +207,22 @@ module.exports = class BabyFtpd
     
     "CWD": (reqPath)->
       try
-        @sessionDir = @fileSystem.getNewPath @sessionDir, reqPath, true
+        dirPath = @fileSystem.getNewPath @sessionDir, reqPath
+        checkDir = @fileSystem.checkPath dirPath
+        if !checkDir.isDirectory()
+          throw new Error "no directory"
+        @sessionDir = dirPath
         @reply 250, "CWD command successful"
       catch err
         @reply 550, "#{reqPath}: No such directory"
     
     "CDUP": ()->
       try
-        @sessionDir = @fileSystem.getNewPath @sessionDir, "..", true
+        dirPath = @fileSystem.getNewPath @sessionDir, ".."
+        checkDir = @fileSystem.checkPath dirPath
+        if !checkDir.isDirectory()
+          throw new Error "no directory"
+        @sessionDir = dirPath
         @reply 200, "CDUP command successful"
       catch err
         @reply 550, "No such directory"
@@ -246,56 +258,43 @@ module.exports = class BabyFtpd
           @dtpServer.dtpSocket.sender data
     
     "STOR": (reqPath)->
-      if reqPath.indexOf("/") >= 0
-        splitPath = reqPath.split "/"
-        fileName = splitPath.pop()
-        dirPath = splitPath.join "/"
-        try
-          retPath = @fileSystem.getNewPath  @sessionDir, dirPath, true
-          srorePath = retPath + "/" + fileName
-        catch err
-          if @passive
-            @dtpServer.close()
-          return @reply 550, "#{reqPath}: No such file or directory"
-      else
-        if @sessionDir is "/"
-          srorePath = "/" + reqPath
-        else
-          srorePath = @sessionDir + "/" + reqPath
-      @dtpServer.store (storeData)=>
-        @fileSystem.setFile storeData, srorePath, (err)=>
-          if err?
-            @reply 550
-          else
-            @reply 250
+      try
+        @fileSystem.checkParentDir @sessionDir, reqPath
+        @dtpServer.store (storeData)=>
+          @fileSystem.setFile storeData, @sessionDir, reqPath, (err)=>
+            if err?
+              @reply 550
+            else
+              @reply 250
+      catch err
+        if @passive
+          @dtpServer.close()
+        return @reply 550, "#{reqPath}: No such file or directory"
+
+    
+    "DELE": (reqPath)->
+      @reply 202
     
     "MKD": (reqPath)->
-      if reqPath.indexOf("/") >= 0
-        splitPath = reqPath.split "/"
-        mkDirName = splitPath.pop()
-        dirPath = splitPath.join "/"
-        try
-          retPath = @fileSystem.getNewPath  @sessionDir, dirPath, true
-          mkPath = retPath + "/" + mkDirName
-        catch err
-          return @reply 550, "#{reqPath}: No such directory"
-      else
-        if @sessionDir is "/"
-          mkPath = "/" + reqPath
-        else
-          mkPath = @sessionDir + "/" + reqPath
-      @fileSystem.makeDir mkPath, (err)=>
-        if err?
-          if err.code is "EEXIST"
-            @reply 550, "#{reqPath}: File exists"
+      try
+        @fileSystem.checkParentDir @sessionDir, reqPath
+        @fileSystem.makeDir @sessionDir, reqPath, (err)=>
+          if err?
+            if err.code is "EEXIST"
+              @reply 550, "#{reqPath}: File exists"
+            else
+              @reply 550
           else
-            @reply 550
-        else
-          @reply 257, "\"#{reqPath}\" - Directory successfully created"
+            @reply 257, "\"#{reqPath}\" - Directory successfully created"
+      catch err
+        return @reply 550, "#{reqPath}: No such directory"
     
     "RMD": (reqPath)->
       try
-        delPath = @fileSystem.getNewPath  @sessionDir, reqPath, true
+        delPath = @fileSystem.getNewPath @sessionDir, reqPath
+        checkDir = @fileSystem.checkPath delPath
+        if !checkDir.isDirectory()
+          throw new Error "no directory"
         @fileSystem.removeDir delPath, (err)=>
           if err?
             if err.code is "ENOTEMPTY"
@@ -349,19 +348,19 @@ module.exports = class BabyFtpd
     
     dtp.on 'listening', ()->
       dtpAddress = @address()
-      console.log "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
+      winston.log "info", "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
       host  = dtpAddress.address.split(".").join(",")
       port1 = parseInt(dtpAddress.port / 256, 10)
       port2 = dtpAddress.port % 256
       socket.reply 227, "Entering Extended Passive Mode (#{host},#{port1},#{port2})"
     
     dtp.on "close", ()->
-      console.log "Data Transfer Proccess Server closed"
+      winston.log "info", "Data Transfer Proccess Server closed"
       socket.passive = false
     
     dtp.on "connection", (dtpSocket)->
       @dtpSocket = dtpSocket
-      console.log "DTP Connect from #{dtpSocket.remoteAddress}"
+      winston.log "info", "DTP Connect from #{dtpSocket.remoteAddress}"
       dtpSocket.setTimeout(0)
       dtpSocket.setNoDelay()
       dtpSocket.dataEncoding = "binary"
@@ -375,15 +374,15 @@ module.exports = class BabyFtpd
         else
           socket.reply 226
       dtpSocket.on "close", ()->
-        console.log "DTP Socket closed"
+        winston.log "info", "DTP Socket closed"
       dtpSocket.on "connect", ()->
-        console.log "DTP Socket connect"
+        winston.log "info", "DTP Socket connect"
       dtpSocket.on 'data', (recData)->
         dtp.storeData.push recData
         dtp.storeData.totalLength += recData.length
       dtpSocket.sender = (dataQueue)->
         socket.reply 150
-        console.log "DTP Send"
+        winston.log "info", "DTP Send"
         dtpSocket.end(dataQueue)
     
     dtp
@@ -396,28 +395,21 @@ class BabyFtpd.FileSystem
   setBase: (dirPath)->
     @baseDir = dirPath
   
-  getNewPath: (nowDir, reqPath, isDir = false)->
-    if reqPath.indexOf("/") is 0
-      retPath = reqPath
-    else
-      tmpDir = nowDir.split("/")
-      reqPath.split("/").map (aPath)->
-        if aPath is ".."
-          tmpDir.pop()
-          if tmpDir.length is 1
-            tmpDir.push ""
-        else if aPath is "."
-          null
-        else
-          if tmpDir.length is 2 and tmpDir[1] is ""
-            tmpDir.pop()
-          tmpDir.push aPath
-      retPath = tmpDir.join("/")
+  getNewPath: (nowDir, reqPath)->
+    retPath = path.join nowDir, reqPath
     if retPath.length > 1 and retPath.match(/\/$/) isnt null
       retPath = retPath.replace /\/$/, ""
-    pathStats = fs.statSync @baseDir+retPath
-    if !isDir or pathStats.isDirectory()
-      retPath
+    retPath
+  
+  checkPath: (reqPath)->
+    fs.statSync @baseDir+reqPath
+  
+  checkParentDir: (nowDir, reqPath)->
+    retPath = @getNewPath nowDir, reqPath
+    dirPath = path.dirname retPath
+    parentDir = @checkPath dirPath
+    if parentDir.isDirectory()
+      return true
     else
       throw new Error "no directory"
   
@@ -442,12 +434,14 @@ class BabyFtpd.FileSystem
     catch err
       callback(err)
   
-  setFile: (storeData, srorePath, callback)->
-    console.log "save #{srorePath}"
+  setFile: (storeData, nowDir, reqPath, callback)->
+    winston.log "info", "save #{srorePath}"
+    srorePath = @getNewPath  nowDir, reqPath
     fs.writeFile @baseDir+srorePath, storeData, "binary", callback
 
-  makeDir: (reqPath, callback)->
-    fs.mkdir @baseDir+reqPath, "0755", callback
+  makeDir: (nowDir, reqPath, callback)->
+    mkPath = @getNewPath  nowDir, reqPath
+    fs.mkdir @baseDir+mkPath, "0755", callback
 
   removeDir: (reqPath, callback)->
     fs.rmdir @baseDir+reqPath, callback
