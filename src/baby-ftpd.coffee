@@ -57,6 +57,7 @@ module.exports = class BabyFtpd
             else if replys[i].match(/^[0-9]/)
               replyData += "  "
             replyData += replys[i] + "\r\n"
+        winston.log "debug", replyData.toString().trim()
         @write(replyData, callback)
       
       # Receive data
@@ -407,7 +408,10 @@ class BabyFtpd.FileSystem
     @baseDir = dirPath
   
   getNewPath: (nowDir, reqPath)->
-    retPath = path.join nowDir, reqPath
+    if reqPath.indexOf("/") is 0
+      retPath = reqPath
+    else
+      retPath = path.join nowDir, reqPath
     if retPath.length > 1 and retPath.match(/\/$/) isnt null
       retPath = retPath.replace /\/$/, ""
     retPath
