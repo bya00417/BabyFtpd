@@ -264,7 +264,10 @@ module.exports = class BabyFtpd
         @dtpServer.store (storeData)=>
           @fileSystem.setFile storeData, @sessionDir, reqPath, (err)=>
             if err?
-              @reply 550
+              if err.message is "Disk quota exceeded"
+                @reply 552, "Transfer aborted. Disk quota exceeded"
+              else
+                @reply 550
             else
               @reply 250
       catch err
@@ -339,8 +342,9 @@ module.exports = class BabyFtpd
     "HELP": ()->
       @reply 214, """
         The following commands are recognized
-        USER    PASS    PWD     NLST    LIST    RETR    SYST
-        CWD     CDUP    MKD     QUIT    PASV    NOOP    HELP
+        USER    PASS    CWD     CDUP    QUIT    PASV    STOR
+        RETR    LIST    NLST    DELE    RMD     MKD     PWD
+        SYST    HELP    NOOP
         Direct comments to root
         """
   
@@ -403,9 +407,13 @@ module.exports = class BabyFtpd
 class BabyFtpd.FileSystem
   constructor: ()->
     @baseDir = null
+    @quotaSize = 0
   
   setBase: (dirPath)->
     @baseDir = dirPath
+  
+  setQuotaSize: (qSize)->
+    @quotaSize = qSize
   
   getNewPath: (nowDir, reqPath)->
     if reqPath.indexOf("/") is 0
@@ -429,30 +437,26 @@ class BabyFtpd.FileSystem
       throw new Error "no directory"
   
   getNlst: (nowDir, reqPath, callback)->
-    try
-      retPath = @getNewPath nowDir, reqPath
-      fs.readdir @baseDir+retPath, callback
-    catch err
-      callback(err)
+    retPath = @getNewPath nowDir, reqPath
+    fs.readdir @baseDir+retPath, callback
   
   getList: (nowDir, reqPath, callback)->
-    try
-      retPath = @getNewPath nowDir, reqPath
-      exec "export LANG=en_US.UTF-8; ls -l #{@baseDir}#{retPath}", callback
-    catch err
-      callback(err)
+    retPath = @getNewPath nowDir, reqPath
+    exec "export LANG=en_US.UTF-8; ls -l #{@baseDir}#{retPath}", callback
   
   getFile: (nowDir, reqPath, callback)->
-    try
-      retPath = @getNewPath nowDir, reqPath
-      fs.readFile @baseDir+retPath, callback
-    catch err
-      callback(err)
+    retPath = @getNewPath nowDir, reqPath
+    fs.readFile @baseDir+retPath, callback
   
   setFile: (storeData, nowDir, reqPath, callback)->
-    winston.log "info", "save #{srorePath}"
-    srorePath = @getNewPath  nowDir, reqPath
-    fs.writeFile @baseDir+srorePath, storeData, "binary", callback
+    if @quotaSize > 0 and storeData.length > @quotaSize
+      # 簡易"Disk quota exceeded"エラーシミュレーター
+      winston.log "info", "Disk quota exceeded"
+      callback(new Error("Disk quota exceeded"))
+    else
+      srorePath = @getNewPath  nowDir, reqPath
+      winston.log "info", "save #{srorePath}"
+      fs.writeFile @baseDir+srorePath, storeData, "binary", callback
   
   removeFile: (reqPath, callback)->
     fs.unlink @baseDir+reqPath, callback
