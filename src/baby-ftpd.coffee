@@ -81,6 +81,11 @@ module.exports = class BabyFtpd
     
     @piServer.listen port, host
 
+  @changeCarriageCode: (data)->
+    retData = data.replace /[\n\r]/g, "\n"
+    retData = retData.replace /[\n]/g, "\r\n"
+    return retData
+
   # Standard messages for status. (RFC 959)
   messages =
     "110": "Restart marker reply."
@@ -238,7 +243,8 @@ module.exports = class BabyFtpd
             @dtpServer.close()
           @reply 550, "#{reqPath}: No such file or directory"
         else
-          @dtpServer.dtpSocket.sender files.join("\r\n") + "\r\n"
+          ls = BabyFtpd.changeCarriageCode files.join("\n") + "\n"
+          @dtpServer.dtpSocket.sender ls
     
     "LIST": (reqPath = "")->
       @fileSystem.getList @sessionDir, reqPath, (err, stdout, stderr)=>
@@ -247,7 +253,8 @@ module.exports = class BabyFtpd
             @dtpServer.close()
           @reply 550, "#{reqPath}: No such file or directory"
         else
-          @dtpServer.dtpSocket.sender stdout.replace(/^total [0-9]+$/im, "").trim()
+          ls = BabyFtpd.changeCarriageCode stdout.replace(/^total [0-9]+$/im, "").trim()+"\n"
+          @dtpServer.dtpSocket.sender ls
     
     "RETR": (reqPath)->
       @fileSystem.getFile @sessionDir, reqPath, (err, data)=>
