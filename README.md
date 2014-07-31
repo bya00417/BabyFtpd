@@ -11,11 +11,17 @@ $ npm install baby-ftpd
 
 ## Usage
 
-```coffee-script
-BabyFtpd = require "baby-ftpd"
+```javascript
+BabyFtpd = require("baby-ftpd");
 
-ftpd = new BabyFtpd
-ftpd.addUser "test", "test"
-ftpd.fileSystem.setBase "/var/ftp"
-ftpd.listen 21, "localhost"
+ftpd = new BabyFtpd();
+ftpd.addUser("test", "test");
+ftpd.fileSystem.setBase("/var/ftp");
+ftpd.listen(21, "localhost");
 ```
+
+If you want to try error simulation mode, please use
+```javascript
+ftpd.fileSystem.setQuotaSize [Max File Size(bytes)]
+```
+It will become an error if a larger file than the specified size is uploaded. 
