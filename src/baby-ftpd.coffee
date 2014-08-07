@@ -268,15 +268,18 @@ module.exports = class BabyFtpd
     "STOR": (reqPath)->
       try
         @fileSystem.checkParentDir @sessionDir, reqPath
-        @dtpServer.store (storeData)=>
-          @fileSystem.setFile storeData, @sessionDir, reqPath, (err)=>
-            if err?
-              if err.message is "Disk quota exceeded"
-                @reply 552, "Transfer aborted. Disk quota exceeded"
+        if @passive
+          @dtpServer.store (storeData)=>
+            @fileSystem.setFile storeData, @sessionDir, reqPath, (err)=>
+              if err?
+                if err.message is "Disk quota exceeded"
+                  @reply 552, "Transfer aborted. Disk quota exceeded"
+                else
+                  @reply 550
               else
-                @reply 550
-            else
-              @reply 250
+                @reply 250
+        else
+          @reply 425
       catch err
         if @passive
           @dtpServer.close()
@@ -389,7 +392,10 @@ module.exports = class BabyFtpd
       dtpSocket.dataEncoding = "binary"
       
       dtpSocket.on "end", ()->
-        socket.dtpServer.close()
+        try
+          socket.dtpServer.close()
+        catch err
+          winston.log "error", err.message
         if dtp.storeMode
           dtpSocket.storeMode = false
           data = Buffer.concat dtp.storeData, dtp.storeData.totalLength
