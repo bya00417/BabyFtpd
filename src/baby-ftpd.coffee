@@ -14,15 +14,19 @@ module.exports = class BabyFtpd
   
   # fields
   authUser = {}
+  logger = null
   
   constructor: (option = {})->
-    @fileSystem = new BabyFtpd.FileSystem()
-    @piServer = net.createServer()
-    @piServer.fileSystem = @fileSystem
-    winston.setLevels winston.config.syslog.levels
+    logger = new winston.Logger({
+      transports: [ new (winston.transports.Console)() ]
+    })
+    logger.setLevels winston.config.syslog.levels
     if option.logger?
       if option.logger.console is false
-        winston.remove winston.transports.Console
+        logger.remove winston.transports.Console
+    @fileSystem = new BabyFtpd.FileSystem(logger)
+    @piServer = net.createServer()
+    @piServer.fileSystem = @fileSystem
   
   addUser: (userName, userPass)->
     authUser[userName] = userPass
@@ -30,10 +34,10 @@ module.exports = class BabyFtpd
   listen: (port = 21, host = "0.0.0.0")->
     @piServer.on 'listening', ()->
       hostInfo = @address()
-      winston.log "info", "Server listening on #{hostInfo.address}:#{hostInfo.port}"
+      logger.log "info", "Server listening on #{hostInfo.address}:#{hostInfo.port}"
     
     @piServer.on 'connection', (socket)->
-      winston.log "info", "Connect from #{socket.remoteAddress}"
+      logger.log "info", "Connect from #{socket.remoteAddress}"
       socket.setTimeout(0)
       socket.setNoDelay()
       socket.dataEncoding = "binary"
@@ -57,12 +61,12 @@ module.exports = class BabyFtpd
             else if replys[i].match(/^[0-9]/)
               replyData += "  "
             replyData += replys[i] + "\r\n"
-        winston.log "debug", replyData.toString().trim()
+        logger.log "debug", replyData.toString().trim()
         @write(replyData, callback)
       
       # Receive data
       socket.on 'data', (recData)->
-        winston.log "debug", recData.toString().trim()
+        logger.log "debug", recData.toString().trim()
         parts    = recData.toString().trim().split(" ")
         command  = parts[0].trim().toUpperCase()
         args     = parts.slice 1, parts.length
@@ -74,7 +78,7 @@ module.exports = class BabyFtpd
       
       # Socket closed
       socket.on 'close', ()->
-        winston.log "info", "Server socket closed."
+        logger.log "info", "Server socket closed."
       
       # Connect approved
       socket.reply 220
@@ -374,19 +378,19 @@ module.exports = class BabyFtpd
     
     dtp.on 'listening', ()->
       dtpAddress = @address()
-      winston.log "info", "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
+      logger.log "info", "Data Transfer Proccess Server listening on #{dtpAddress.address}:#{dtpAddress.port}"
       host  = dtpAddress.address.split(".").join(",")
       port1 = parseInt(dtpAddress.port / 256, 10)
       port2 = dtpAddress.port % 256
       socket.reply 227, "Entering Extended Passive Mode (#{host},#{port1},#{port2})"
     
     dtp.on "close", ()->
-      winston.log "info", "Data Transfer Proccess Server closed"
+      logger.log "info", "Data Transfer Proccess Server closed"
       socket.passive = false
     
     dtp.on "connection", (dtpSocket)->
       @dtpSocket = dtpSocket
-      winston.log "info", "DTP Connect from #{dtpSocket.remoteAddress}"
+      logger.log "info", "DTP Connect from #{dtpSocket.remoteAddress}"
       dtpSocket.setTimeout(0)
       dtpSocket.setNoDelay()
       dtpSocket.dataEncoding = "binary"
@@ -395,7 +399,7 @@ module.exports = class BabyFtpd
         try
           socket.dtpServer.close()
         catch err
-          winston.log "error", err.message
+          logger.log "error", err.message
         if dtp.storeMode
           dtpSocket.storeMode = false
           data = Buffer.concat dtp.storeData, dtp.storeData.totalLength
@@ -403,24 +407,27 @@ module.exports = class BabyFtpd
         else
           socket.reply 226
       dtpSocket.on "close", ()->
-        winston.log "info", "DTP Socket closed"
+        logger.log "info", "DTP Socket closed"
       dtpSocket.on "connect", ()->
-        winston.log "info", "DTP Socket connect"
+        logger.log "info", "DTP Socket connect"
       dtpSocket.on 'data', (recData)->
         dtp.storeData.push recData
         dtp.storeData.totalLength += recData.length
       dtpSocket.sender = (dataQueue)->
         socket.reply 150
-        winston.log "info", "DTP Send"
+        logger.log "info", "DTP Send"
         dtpSocket.end(dataQueue)
     
     dtp
 
 
 class BabyFtpd.FileSystem
-  constructor: ()->
+  logger = null
+  
+  constructor: (_logger)->
     @baseDir = null
     @quotaSize = 0
+    logger = _logger
   
   setBase: (dirPath)->
     @baseDir = dirPath
@@ -464,11 +471,11 @@ class BabyFtpd.FileSystem
   setFile: (storeData, nowDir, reqPath, callback)->
     if @quotaSize > 0 and storeData.length > @quotaSize
       # 簡易"Disk quota exceeded"エラーシミュレーター
-      winston.log "info", "Disk quota exceeded"
+      logger.log "info", "Disk quota exceeded"
       callback(new Error("Disk quota exceeded"))
     else
       srorePath = @getNewPath  nowDir, reqPath
-      winston.log "info", "save #{srorePath}"
+      logger.log "info", "save #{srorePath}"
       fs.writeFile @baseDir+srorePath, storeData, "binary", callback
   
   removeFile: (reqPath, callback)->

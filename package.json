@@ -1,6 +1,6 @@
 {
   "name": "baby-ftpd",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "BabyFtpd ========",
   "main": "lib/baby-ftpd.js",
   "scripts": {
