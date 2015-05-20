@@ -7,6 +7,7 @@ fs      = require "fs"
 path    = require "path"
 exec    = require("child_process").exec
 winston = require "winston"
+mkdirp  = require "mkdirp"
 
 module.exports = class BabyFtpd
   # Static variables
@@ -431,6 +432,10 @@ class BabyFtpd.FileSystem
   
   setBase: (dirPath)->
     @baseDir = dirPath
+    try
+      fs.statSync @baseDir
+    catch
+      mkdirp.sync @baseDir
   
   setQuotaSize: (qSize)->
     @quotaSize = qSize
